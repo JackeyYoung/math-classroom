@@ -1,63 +1,46 @@
-export async function onRequest(context) {
-  console.log('[llm] 请求进入，method =', context.request.method);   // ⭐ 加这行
-  const { request, env } = context;
+// api/llm.js — Vercel Serverless Function
+export default async function handler(req, res) {
+  // CORS 头（允许所有来源，方便调试）
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  /* ---------- 1. CORS 预检 ---------- */
-  if (request.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
-        'Access-Control-Max-Age': '86400',
-      }
+  // OPTIONS 预检
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  // 只接受 POST
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  // 检查 API Key
+  const apiKey = process.env.ZHIPU_API_KEY;
+  if (!apiKey) {
+    return res.status(401).json({
+      error: 'API key is not configured',
+      hint: '请在 Vercel 项目设置里配置环境变量 ZHIPU_API_KEY'
     });
   }
 
-  /* ---------- 2. 只接受 POST ---------- */
-  if (request.method !== 'POST') {
-    return new Response('Method not allowed', {
-      status: 405,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-      }
-    });
-  }
-
-  /* ---------- 3. 转发到智谱 ---------- */
-  const body = await request.text();
-
-  let response;
+  // 转发到智谱
   try {
-    response = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
+    const response = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${env.ZHIPU_API_KEY}`
+        'Authorization': `Bearer ${apiKey}`
       },
-      body
+      body: JSON.stringify(req.body)
     });
-  } catch (e) {
-    return new Response(JSON.stringify({
-      error: '上游请求失败',
-      detail: e.message
-    }), {
-      status: 502,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
-      }
+
+    const data = await response.json();
+    return res.status(response.status).json(data);
+  } catch (error) {
+    return res.status(502).json({
+      error: 'Upstream request failed',
+      detail: error.message
     });
   }
-
-  const data = await response.text();
-
-  return new Response(data, {
-    status: response.status,
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*'
-    }
-  });
 }
